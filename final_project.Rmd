@@ -3,20 +3,22 @@ title: "Analysis of COVID-19 Deaths and Air Quality in California, 2020"
 author: "Jillian Allison"
 date: "`r Sys.Date()`"
 output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-notes: 
-- get socioeconomic data ---- so we can control for the effects of that and see if air quality without SE disadvantage makes a difference in COVID deaths 
-Analyses 
-- 5 year average air quality scc ----> cumulative COVID deaths per 100,000 by zip code in 2020
-    - then analyze w income effects
-- 5 year average air quality CA ----> cumulative COVID deaths per 100,000 by county in 2020 
-    - then analyze w income effects 
-
+notes: - get socioeconomic data ---- so we can control for the effects
+of that and see if air quality without SE disadvantage makes a
+difference in COVID deaths Analyses - 5 year average air quality scc
+----\> cumulative COVID deaths per 100,000 by zip code in 2020 - then
+analyze w income effects - 5 year average air quality CA ----\>
+cumulative COVID deaths per 100,000 by county in 2020 - then analyze w
+income effects
 
 ```{r}
 # Packages
@@ -37,6 +39,7 @@ lct <- Sys.getlocale("LC_TIME"); Sys.setlocale("LC_TIME", "C")
 ### Load & Clean Data
 
 #### Air Quality Data
+
 ```{r}
 # CA
 # Load raw data
@@ -72,40 +75,11 @@ ltavg_aqi_ca <- aqi_ca %>%
   summarize(average_aqi = mean(daily_aqi_value))
 ```
 
-```{r}
-# Santa Clara County 
-raw_aq_scc_2015 <- read.csv(file.path(datadir, "air_quality","aq_scc_2015.csv"), stringsAsFactors = FALSE)
-raw_aq_scc_2016 <- read.csv(file.path(datadir, "air_quality","aq_scc_2016.csv"), stringsAsFactors = FALSE)
-raw_aq_scc_2017 <- read.csv(file.path(datadir, "air_quality","aq_scc_2017.csv"), stringsAsFactors = FALSE)
-raw_aq_scc_2018 <- read.csv(file.path(datadir, "air_quality","aq_scc_2018.csv"), stringsAsFactors = FALSE)
-raw_aq_scc_2019 <- read.csv(file.path(datadir, "air_quality","aq_scc_2019.csv"), stringsAsFactors = FALSE)
-raw_aq_scc_2020 <- read.csv(file.path(datadir, "air_quality","aq_scc_2020.csv"), stringsAsFactors = FALSE)
+#### COVID Data
 
-# Combine data frames 
-raw_aq_scc <- rbind(raw_aq_scc_2015, raw_aq_scc_2016, raw_aq_scc_2017,
-                   raw_aq_scc_2018, raw_aq_scc_2019, raw_aq_scc_2020) %>%
-  clean_names()
+We're using 2020 data because we can assume that people have not been
+vaccinated against COVID.
 
-raw_aq_scc$date <- as.Date(raw_aq_scc$date, format = "%m/%d/%Y")
-  
-
-# Select necessary columns 
-aqi_scc <- raw_aq_scc %>%
-  select(1, 7:8, 19:20)
-
-pm_scc <- raw_aq_scc %>%
-  select(1, 5:6, 8, 19:20)
-
-# Create the 6 year averages by county --- 2015 - 2020 
-ltavg_pm_scc <- pm_scc %>%
-  group_by(site_name, site_latitude, site_longitude) %>%
-  summarize(average_pm = mean(daily_mean_pm2_5_concentration))
-
-ltavg_aqi_scc <- aqi_scc %>%
-  group_by(site_name, site_latitude, site_longitude) %>%
-  summarize(average_aqi = mean(daily_aqi_value))
-```
-#### COVID Data 
 ```{r}
 # CALIFORNIA
 raw_ca_covid_2020 <- read_csv(file.path(datadir, "ca_cases_tests_deaths.csv"))
@@ -113,77 +87,374 @@ raw_ca_covid_2020 <- read_csv(file.path(datadir, "ca_cases_tests_deaths.csv"))
 # Filter for only counties represented in AQ data, select relevant columns 
 ca_covid_2020 <- raw_ca_covid_2020 %>%
   filter(area %in% pm_ca$county) %>%
-  select(1, 2, 4:8)
+  select(1, 2, 4:8) %>%
+  filter(between(date, as.Date("2020-01-01"), as.Date("2020-12-31")))
+
+# Make summary county data for 2020
+ca_counties_covid <- ca_covid_2020 %>%
+  group_by(area, population) %>%
+  summarize(cum_cases = sum(cases), 
+            cum_deaths = sum(deaths)) %>%
+  rename(county = area) %>%
+  mutate(cum_death_rate = ((cum_deaths / population) * 100000)) %>% # We need to use case rates because areas with higher pops will obv have higher deaths. 
+  mutate(cum_case_rate = ((cum_cases / population) * 100000)) %>% # Same logic as above ^^^ 
+  mutate(deaths_pct_cases = ((cum_deaths / cum_cases) * 100)) # but I think this is what we should use. bc obviously deaths are dependent on cases .... 
 ```
 
+## Data Analysis
+
+-   5 year average air quality CA ----\> cumulative COVID deaths per
+    100,000 by county in 2020
+    -   then analyze w income effects, age effects (find % over 65 data
+        by county, should be easy)
+
+$$Deaths_i =\beta_{0}+\beta_{1} \cdot AQI_i+\varepsilon_i$$
 
 ```{r}
-# SANTA CLARA COUNTY
-# Santa Clara County cumulative COVID data by zip code for 2020
-raw_scc_cum_covid_2020 <- read_csv(file.path(datadir, "cum_deaths_zipcode_scc.csv"))
+# Relationship between 6 year avg air quality and cumulative COVID deaths per 100,000 by county in 2020
+# These are the 6 year averages for AQI in each county
+ltavg_aqi_ca
+# These are the 6 year averages for PM 2.5 in each county 
+ltavg_pm_ca 
+# These are the COVID data 
+ca_counties_covid
 
-# Data wrangling
-scc_cum_covid_2020 <- raw_scc_cum_covid_2020 %>%
-  rename(zip_code = zcta) 
-
-# Zip codes contains lat and lon info 
-zip_codes <- read_csv(file.path(datadir, "zip_lat_long.csv")) %>%
- rename(zip_code = ZIP) %>%
- mutate(zip_code = as.numeric(zip_code)) %>%
- filter(zip_code %in% scc_cum_covid_2020$zip_code) 
-
-scc_cum_covid_spatial <- inner_join(scc_cum_covid_2020, zip_codes, by = "zip_code")
+# Create a df for AQI 
+california_aqi_covid <- inner_join(ltavg_aqi_ca, ca_counties_covid,  by = "county")
+# Create a df for PM 2.5 
+california_pm_covid <- inner_join(ltavg_pm_ca, ca_counties_covid,  by = "county")
 ```
 
-
-### Spatially representing SCC data 
-I'll compare north county and south county COVID death rates since the air quality is different --- better in Gilroy than in the valley
-```{r}
-# Santa Clara County--- 
-# Making things SPATIAL 
-
-# Covid cumulative deaths 
-library(terra)
-library(tidyterra)
-library(ggplot2)
-
-zip_codes_vect <- vect(scc_cum_covid_spatial, geom=c("LNG", "LAT"), crs="EPSG:4326", keepgeom=FALSE)
-
-
-ltavg_pm_scc_vect <- vect(ltavg_pm_scc, geom = c("site_longitude", "site_latitude"), crs = "EPSG:4326",  keepgeom = FALSE)
-
-ltavg_aqi_scc_vect <- vect(ltavg_aqi_scc, geom = c("site_longitude", "site_latitude"), crs = "EPSG:4326",  keepgeom = FALSE)
-
-ggplot() + 
-  geom_spatraster(data = map_rcl) + 
-  scale_fill_gradient(low = "#cfe2f3", 
-                      high = "#6aa84f") + 
-  geom_spatvector(data = ltavg_aqi_scc_vect)
-
-```
+### Basic scatterplots
 
 ```{r}
-# Beginnings of a map but you should fix the color and the fact that its floating ok 
+library(ggrepel)
+# Lets just make a simple plot--- independent: AQI, dependent: deaths as a percent of cases 
+death_aqi_plt <- ggplot(data = california_aqi_covid, aes(x = average_aqi, y = deaths_pct_cases)) + 
+  geom_point() + 
+  labs(title = "Deaths & AQI by CA County, 2020", 
+       x = "Average Daily AQI from 2015 - 2020", 
+       y = "Cumulative deaths as a percent of cases (%)") + 
+  theme_minimal()
 
-county_boundary <- file.path("/Users/jillianallison/Desktop/MEDS/Courses/EDS222/data/final/scc_county_boundary/geo_export_68da2c43-7af7-4d7a-b35c-05339ab65394.shp")
-county_boundary_v <- vect(f)
+death_aqi_plt + 
+  geom_label_repel(aes(label = county)) + 
+  geom_smooth(method='lm', formula= y~x, color="lightcoral", se=F, size=1.5)
 
-spatial_extent <- rast(bb, crs = "EPSG:3857")
-map <- set_defaults(map_service = "esri", map_type = "natgeo_world_map")
+# What if we remove the outliers (Inyo and Alpine)
+rmoutliers_aqi <- california_aqi_covid %>%
+  subset(!county %in% c("Alpine", "Inyo"))
 
-basemap_tif <- basemap_geotif(ext = county_boundary_v) # downloads a basemap as a .tif file
+rmoutliers_aqi_plt <- ggplot(data = rmoutliers_aqi, aes(x = average_aqi, y = deaths_pct_cases)) + 
+  geom_point() + 
+  labs(title = "Deaths & AQI by CA County, 2020", 
+       x = "Average Daily AQI from 2015 - 2020", 
+       y = "Cumulative deaths as a percent of cases (%)") + 
+  theme_minimal()
 
-map <- rast(file.path(basemap_tif)) 
-
-rcl <- matrix(c(200, Inf, 1), ncol = 3, byrow = TRUE)
-
-map_rcl <- classify(map, rcl = rcl)
-
-
-ggplot() + 
-  geom_spatraster(data = map_rcl) + 
-  scale_fill_gradient(low = "#cfe2f3", 
-                      high = "#6aa84f") +
-  geom_spatvector(data = zip_codes_vect) 
+rmoutliers_aqi_plt + 
+  geom_label_repel(aes(label = county)) +
+  geom_smooth(method='lm', formula= y~x, color="lightcoral", se=F, size=1.5)
 ```
 
+```{r}
+# Lets just make a simple plot--- independent: PM 2.5, dependent: deaths as a percent of cases 
+death_pm_plt <- ggplot(data = california_pm_covid, aes(x = average_pm, y = deaths_pct_cases)) + 
+  geom_point() + 
+  labs(title = "Deaths & PM 2.5 by CA County, 2020", 
+       x = "Average Daily PM 2.5 from 2015 - 2020", 
+       y = "Cumulative deaths as a percent of cases (%)") + 
+  theme_minimal()
+
+death_pm_plt + 
+  geom_label_repel(aes(label = county)) +
+  geom_smooth(method='lm', formula= y~x, color="lightcoral", se=F, size=1.5)
+
+# What if we remove the outliers (Inyo and Alpine)
+rmoutliers_pm <- california_pm_covid %>%
+  subset(!county %in% c("Alpine", "Inyo"))
+
+rmoutliers_pm_plt <- ggplot(data = rmoutliers_pm, aes(x = average_pm, y = deaths_pct_cases)) + 
+  geom_point() + 
+  labs(title = "Deaths & PM 2.5 by CA County, 2020", 
+       x = "Average Daily PM 2.5 from 2015 - 2020", 
+       y = "Cumulative deaths as a percent of cases (%)") + 
+  theme_minimal()
+
+rmoutliers_pm_plt + 
+  geom_label_repel(aes(label = county)) +
+  geom_smooth(method='lm', formula= y~x, color="lightcoral", se=F, size=1.5)
+```
+
+### Linear regressions- single variable
+
+```{r}
+# AQI 
+# With Alpine and Inyo Counties 
+summary(lm(deaths_pct_cases ~ average_aqi, data =california_aqi_covid))
+
+# Without Alpine and Inyo Counties 
+summary(lm(deaths_pct_cases ~ average_aqi, data =rmoutliers_aqi))
+```
+
+**INTERPRET RESULTS FROM LINEAR REGRESSION**
+
+```{r}
+# PM 2.5 
+# With Alpine and Inyo Counties 
+summary(lm(deaths_pct_cases ~ average_pm, data =california_pm_covid))
+
+# Without Alpine and Inyo Counties 
+summary(lm(deaths_pct_cases ~ average_pm, data =rmoutliers_pm))
+```
+
+**INTERPRET RESULTS FROM LINEAR REGRESSION**
+
+## But we know that different factors can affect COVID deaths...
+
+I'll add two well-known determinants of COVID outcomes into my analysis-
+% of population in county over the age of 65, and income data
+
+$$Deaths_i=\beta_{0}+\beta_{1} \cdot Poverty_i + \beta_{2} \cdot AQI_i + \beta_{3} \cdot Poverty_i \cdot AQI_i + \varepsilon_i$$
+
+### Read in poverty and demographic data
+
+```{r}
+# Read in poverty data 
+raw_ca_counties_poverty <- read_csv(file.path(datadir, "pov_data_county_allrows.csv"))
+
+# Read in demographic data 
+raw_ca_counties_demographics <- read_csv(file.path(datadir, "dem_data_county_allrows.csv"))
+```
+
+### Clean poverty data
+
+```{r}
+# Clean poverty data 
+ca_counties_poverty <- raw_ca_counties_poverty %>%
+  clean_names() %>%
+  filter(label_grouping == "Population for whom poverty status is determined") %>% 
+  subset(select = -c(label_grouping)) %>%
+  pivot_longer(cols = 1:ncol(.), 
+               names_to = "county", 
+               values_to = "poverty_level_pct")
+
+# Let's fix the county column values and make the percentages numeric 
+ca_counties_poverty <- ca_counties_poverty %>%
+  mutate(county = str_remove(.$county, 
+                             pattern = "_county_california_percent_below_poverty_level_estimate"))%>%
+  mutate(poverty_level_pct = as.numeric(str_remove(.$poverty_level_pct, pattern = "%")))%>%
+  mutate(county = str_replace_all(.$county, 
+                              pattern = "[_]", " "))%>%
+  mutate(county = str_to_title(.$county)) %>% 
+  filter(county %in% ca_counties_covid$county)  # filter for only available counties
+
+```
+
+### Clean demographic data
+
+```{r}
+med_age_matrix <- raw_ca_counties_demographics %>%
+  clean_names() %>%
+  slice(19) %>% 
+  subset(select = -c(label_grouping)) %>%
+  t() %>%
+  cbind(county = rownames(.))
+rownames(med_age_matrix) <- 1:nrow(med_age_matrix)
+
+ca_counties_med_age <- as.data.frame(med_age_matrix) %>%
+  select(county, med_age = V1) %>%
+  filter(str_detect(county, "estimate")) %>% 
+  mutate(county = str_remove(.$county, 
+                             pattern = "_county_california_estimate")) %>%
+  mutate(med_age = as.numeric(med_age))%>%
+  mutate(county = str_replace_all(.$county, 
+                              pattern = "[_]", " "))%>%
+  mutate(county = str_to_title(.$county)) %>% 
+  filter(county %in% ca_counties_covid$county)
+```
+
+```{r}
+over_65_matrix <- raw_ca_counties_demographics %>%
+  clean_names() %>%
+  slice(25)  %>% 
+  subset(select = -c(label_grouping)) %>%
+  t() %>%
+  cbind(county = rownames(.))
+rownames(over_65_matrix) <- 1:nrow(over_65_matrix)
+
+
+ca_counties_over_65 <- as.data.frame(over_65_matrix) %>%
+  select(county, pct_over_65 = V1) %>%
+  filter(str_detect(county, "percent")) %>% 
+  mutate(county = str_remove(.$county, 
+                             pattern = "_county_california_percent")) %>%
+  mutate(pct_over_65 = as.numeric(str_remove(.$pct_over_65, pattern = "%"))) %>%
+  mutate(pct_over_65 = as.numeric(pct_over_65)) %>%
+  mutate(county = str_replace_all(.$county, 
+                              pattern = "[_]", " ")) %>%
+  mutate(county = str_to_title(.$county)) %>% 
+  filter(county %in% ca_counties_covid$county)
+```
+
+### Data Analysis with MORE INFO!
+
+```{r}
+# Data: for reference 
+# Here's my poverty data: 
+ca_counties_poverty
+
+# Here's demographic data: 
+ca_counties_med_age
+ca_counties_over_65
+
+# Here are the joined data frames 
+california_poverty_covid <- inner_join(ca_counties_covid, ca_counties_poverty, by = "county")
+
+california_medage_covid <- inner_join(ca_counties_covid, ca_counties_med_age, by = "county")
+
+california_pct65_covid <- inner_join(ca_counties_covid, ca_counties_over_65, by = "county")
+```
+
+#### Basic plots showing relationships between just poverty / demographics and COVID deaths
+
+```{r}
+# POVERTY 
+death_poverty_plt <- ggplot(data = california_poverty_covid, aes(x = poverty_level_pct, y = deaths_pct_cases)) + 
+  geom_point() + 
+  labs(title = "Deaths & Poverty by CA County, 2020", 
+       x = "Poverty Level (%)", 
+       y = "Cumulative deaths as a percent of cases (%)") + 
+  theme_minimal()
+
+death_poverty_plt + 
+  geom_label_repel(aes(label = county)) + 
+  geom_smooth(method='lm', formula= y~x, color="lightcoral", se=F, size=1.5)
+```
+
+```{r}
+# MEDIAN AGE
+death_medage_plt <- ggplot(data = california_medage_covid, aes(x = med_age, y = deaths_pct_cases)) + 
+  geom_point() + 
+  labs(title = "Deaths & Median Age by CA County, 2020", 
+       x = "Median Age", 
+       y = "Cumulative deaths as a percent of cases (%)") + 
+  theme_minimal()
+
+death_medage_plt + 
+  geom_label_repel(aes(label = county)) + 
+  geom_smooth(method='lm', formula= y~x, color="lightcoral", se=F, size=1.5)
+```
+
+```{r}
+# PCT OVER 65
+death_pct65_plt <- ggplot(data = california_pct65_covid, aes(x = pct_over_65, y = deaths_pct_cases)) + 
+  geom_point() + 
+  labs(title = "Deaths & Percent of Population Over 65 by CA County, 2020", 
+       x = "Percentage of population older than 65 (%)", 
+       y = "Cumulative deaths as a percent of cases (%)") + 
+  theme_minimal()
+
+death_pct65_plt + 
+  geom_label_repel(aes(label = county)) + 
+  geom_smooth(method='lm', formula= y~x, color="lightcoral", se=F, size=1.5)
+```
+
+**Based on these plots, age demographics do not appear to have much of
+an effect on county level cumulative COVID deaths. Poverty does appear
+to have an effect on county level cumulative COVID deaths.**
+
+**Let's run an interaction model to explore the relationship between
+cumulative COVID deaths as a percentage of cumulative cases, and poverty
+rates by county in 2020.**
+
+### Interaction Model
+
+```{r}
+# First we need a data frame with both poverty and AQ information. 
+# PM 2.5, POVERTY, AND COVID 
+pm_poverty_covid <- inner_join(california_pm_covid, ca_counties_poverty, by = "county")
+
+# AQI, POVERTY, AND COVID
+aqi_poverty_covid <- inner_join(california_aqi_covid, ca_counties_poverty, by = "county")
+
+### WITHOUT OUTLIERS ###
+# PM 2.5, POVERTY, AND COVID
+pm_poverty_covid_rmoutliers <- inner_join(california_pm_covid, ca_counties_poverty, by = "county") %>%
+  subset(!county %in% c("Alpine", "Inyo"))
+
+# AQI, POVERTY, COVID 
+aqi_poverty_covid_rmoutliers <- inner_join(california_aqi_covid, ca_counties_poverty, by = "county") %>%
+  subset(!county %in% c("Alpine", "Inyo"))
+```
+
+```{r}
+# PLOT PM 
+ggplot(pm_poverty_covid, aes(y = deaths_pct_cases, x = average_pm, color = poverty_level_pct)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  scale_color_gradient(low = "blue", high = "red") + 
+  labs(title = "PM 2.5 and COVID Deaths by County in California, 2020", 
+       x = "Average Daily PM 2.5 from 2015 - 2020", 
+       y = "Cumulative Deaths as a Percent of Cumulative Cases (%)") + 
+  theme_minimal()
+```
+
+```{r}
+# PLOT PM WITHOUT OUTLIERS 
+pm_int_plot <- ggplot(pm_poverty_covid_rmoutliers, aes(y = deaths_pct_cases, x = average_pm, color = poverty_level_pct)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  scale_color_gradient(low = "blue", high = "red") + 
+  labs(title = "PM 2.5 and COVID Deaths by County in California, 2020 (outliers removed)", 
+       x = "Average Daily PM 2.5 from 2015 - 2020", 
+       y = "Cumulative Deaths as a Percent of Cumulative Cases (%)", 
+       color = "Poverty Level (%)") + 
+  theme_minimal()
+
+pm_int_plot
+
+# pm_int_plot + 
+#   geom_label_repel(aes(label = county)) +
+#   geom_smooth(method='lm', formula= y~x, color="lightcoral", se=F, size=1.5)
+```
+
+```{r}
+# PM 2.5
+summary(lm(deaths_pct_cases ~  average_pm + poverty_level_pct + poverty_level_pct:average_pm, data = pm_poverty_covid))
+
+summary(lm(deaths_pct_cases ~  average_pm + poverty_level_pct + poverty_level_pct:average_pm, data = pm_poverty_covid_rmoutliers))
+```
+
+**INTERPRET REGRESSION RESULTS**
+
+REMOVED OUTLIERS
+
+Coefficients: Estimate Std. Error t value Pr(\>\|t\|) (Intercept)
+0.891266 0.839153 1.062 0.294 average_pm -0.001107 0.088463 -0.013 0.990
+poverty_level_pct 0.007032 0.057871 0.122 0.904
+average_pm:poverty_level_pct 0.001261 0.005801 0.217 0.829
+
+Residual standard error: 0.4185 on 46 degrees of freedom Multiple
+R-squared: 0.07067, Adjusted R-squared: 0.01006 F-statistic: 1.166 on 3
+and 46 DF, p-value: 0.333
+
+```{r}
+# AQI
+summary(lm(deaths_pct_cases ~  poverty_level_pct + average_aqi + poverty_level_pct:average_aqi, data = aqi_poverty_covid))
+
+summary(lm(deaths_pct_cases ~  poverty_level_pct + average_aqi + poverty_level_pct:average_aqi, data = aqi_poverty_covid_rmoutliers))
+```
+
+**INTERPRET REGRESSION RESULTS**
+
+REMOVED OUTLIERS
+
+Coefficients: **Estimate Std. Error t value Pr(\>\|t\|)** (Intercept)
+0.6652902 0.9112505 0.730 0.469 poverty_level_pct 0.0058699 0.0614820
+0.095 0.924 average_aqi 0.0074039 0.0264355 0.280 0.781
+poverty_level_pct:average_aqi 0.0003046 0.0017161 0.177 0.860
+
+Residual standard error: 0.4094 on 46 degrees of freedom Multiple
+R-squared: 0.111, Adjusted R-squared: 0.05304 F-statistic: 1.915 on 3
+and 46 DF, p-value: 0.1404

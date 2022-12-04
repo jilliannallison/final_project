@@ -1,0 +1,131 @@
+---
+title: "Santa Clara County"
+author: "Jillian Allison"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Packages
+library(tidyverse)
+library(readr)
+library(gt)
+library(tufte)
+library(janitor)
+
+# File paths
+rootdir <- ("/Users/jillianallison/Desktop/MEDS/Courses/EDS222")
+datadir <- file.path(rootdir,"data","final")
+
+lct <- Sys.getlocale("LC_TIME"); Sys.setlocale("LC_TIME", "C")
+```
+
+## Air Quality Data 
+```{r}
+# Santa Clara County 
+raw_aq_scc_2015 <- read.csv(file.path(datadir, "air_quality","aq_scc_2015.csv"), stringsAsFactors = FALSE)
+raw_aq_scc_2016 <- read.csv(file.path(datadir, "air_quality","aq_scc_2016.csv"), stringsAsFactors = FALSE)
+raw_aq_scc_2017 <- read.csv(file.path(datadir, "air_quality","aq_scc_2017.csv"), stringsAsFactors = FALSE)
+raw_aq_scc_2018 <- read.csv(file.path(datadir, "air_quality","aq_scc_2018.csv"), stringsAsFactors = FALSE)
+raw_aq_scc_2019 <- read.csv(file.path(datadir, "air_quality","aq_scc_2019.csv"), stringsAsFactors = FALSE)
+raw_aq_scc_2020 <- read.csv(file.path(datadir, "air_quality","aq_scc_2020.csv"), stringsAsFactors = FALSE)
+
+# Combine data frames 
+raw_aq_scc <- rbind(raw_aq_scc_2015, raw_aq_scc_2016, raw_aq_scc_2017,
+                   raw_aq_scc_2018, raw_aq_scc_2019, raw_aq_scc_2020) %>%
+  clean_names()
+
+raw_aq_scc$date <- as.Date(raw_aq_scc$date, format = "%m/%d/%Y")
+  
+
+# Select necessary columns 
+aqi_scc <- raw_aq_scc %>%
+  select(1, 7:8, 19:20)
+
+pm_scc <- raw_aq_scc %>%
+  select(1, 5:6, 8, 19:20)
+
+# Create the 6 year averages by county --- 2015 - 2020 
+ltavg_pm_scc <- pm_scc %>%
+  group_by(site_name, site_latitude, site_longitude) %>%
+  summarize(average_pm = mean(daily_mean_pm2_5_concentration))
+
+ltavg_aqi_scc <- aqi_scc %>%
+  group_by(site_name, site_latitude, site_longitude) %>%
+  summarize(average_aqi = mean(daily_aqi_value))
+```
+
+## COVID Data
+```{r}
+# SANTA CLARA COUNTY
+# Santa Clara County cumulative COVID data by zip code for 2020
+raw_scc_cum_covid_2020 <- read_csv(file.path(datadir, "cum_deaths_zipcode_scc.csv"))
+
+# Data wrangling
+scc_cum_covid_2020 <- raw_scc_cum_covid_2020 %>%
+  rename(zip_code = zcta) 
+
+# Zip codes contains lat and lon info 
+zip_codes <- read_csv(file.path(datadir, "zip_lat_long.csv")) %>%
+ rename(zip_code = ZIP) %>%
+ mutate(zip_code = as.numeric(zip_code)) %>%
+ filter(zip_code %in% scc_cum_covid_2020$zip_code) 
+
+scc_cum_covid_spatial <- inner_join(scc_cum_covid_2020, zip_codes, by = "zip_code")
+```
+
+## Spatial stuff
+```{r}
+# Santa Clara County--- 
+# Making things SPATIAL 
+
+# Covid cumulative deaths 
+library(terra)
+library(tidyterra)
+library(ggplot2)
+
+zip_codes_vect <- vect(scc_cum_covid_spatial, geom=c("LNG", "LAT"), crs="EPSG:4326", keepgeom=FALSE)
+
+
+ltavg_pm_scc_vect <- vect(ltavg_pm_scc, geom = c("site_longitude", "site_latitude"), crs = "EPSG:4326",  keepgeom = FALSE)
+
+ltavg_aqi_scc_vect <- vect(ltavg_aqi_scc, geom = c("site_longitude", "site_latitude"), crs = "EPSG:4326",  keepgeom = FALSE)
+
+```
+
+```{r}
+library(basemaps)
+# Beginnings of a map but you should fix the color and the fact that its floating ok 
+county_boundary <- file.path("/Users/jillianallison/Desktop/MEDS/Courses/EDS222/data/final/scc_county_boundary/geo_export_68da2c43-7af7-4d7a-b35c-05339ab65394.shp")
+county_boundary_v <- vect(county_boundary)
+
+spatial_extent <- rast(county_boundary_v, crs = "EPSG:3857")
+map <- set_defaults(map_service = "esri", map_type = "natgeo_world_map")
+
+basemap_tif <- basemap_geotif(ext = county_boundary_v) # downloads a basemap as a .tif file
+
+map <- rast(file.path(basemap_tif)) 
+
+rcl <- matrix(c(200, Inf, 1), ncol = 3, byrow = TRUE)
+
+map_rcl <- classify(map, rcl = rcl)
+
+
+ggplot() + 
+  geom_spatraster(data = map_rcl) + 
+  scale_fill_gradient(low = "#cfe2f3", 
+                      high = "#6aa84f") +
+  geom_spatvector(data = zip_codes_vect) 
+
+# Map different AQ stations 
+ggplot() +
+  geom_spatraster(data = map_rcl) +
+  scale_fill_gradient(low = "#cfe2f3",
+                      high = "#6aa84f") +
+  geom_spatvector(data = ltavg_aqi_scc_vect)
+
+```
+
+
