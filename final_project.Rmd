@@ -176,7 +176,7 @@ rmoutliers_pm <- california_pm_covid %>%
 
 rmoutliers_pm_plt <- ggplot(data = rmoutliers_pm, aes(x = average_pm, y = deaths_pct_cases)) + 
   geom_point() + 
-  labs(title = "Deaths & PM 2.5 by CA County, 2020", 
+  labs(title = "Deaths & PM 2.5 by CA County, 2020 (outliers removed)", 
        x = "Average Daily PM 2.5 from 2015 - 2020", 
        y = "Cumulative deaths as a percent of cases (%)") + 
   theme_minimal()
@@ -195,6 +195,14 @@ summary(lm(deaths_pct_cases ~ average_aqi, data =california_aqi_covid))
 
 # Without Alpine and Inyo Counties 
 summary(lm(deaths_pct_cases ~ average_aqi, data =rmoutliers_aqi))
+
+model_aqi_rmoutliers <- lm(deaths_pct_cases ~ average_aqi, data =rmoutliers_aqi)
+
+# Confidence Interval
+CI_aqi <- confint(model_aqi_rmoutliers, level = 0.95)
+
+apply(CI_aqi, 1, function(x) paste0("95% CI: [", 
+        round(x[1], 2), ",", round(x[2], 2), "]"))
 ```
 
 **INTERPRET RESULTS FROM LINEAR REGRESSION**
@@ -206,6 +214,16 @@ summary(lm(deaths_pct_cases ~ average_pm, data =california_pm_covid))
 
 # Without Alpine and Inyo Counties 
 summary(lm(deaths_pct_cases ~ average_pm, data =rmoutliers_pm))
+
+# Confidence Interval
+model_pm_rmoutliers <- lm(deaths_pct_cases ~ average_pm, data =rmoutliers_pm)
+
+tab_model(model_pm_rmoutliers)
+
+CI_pm <- confint(model_pm_rmoutliers, level = 0.95)
+
+apply(CI_pm, 1, function(x) paste0("95% CI: [", 
+        round(x[1], 2), ",", round(x[2], 2), "]"))
 ```
 
 **INTERPRET RESULTS FROM LINEAR REGRESSION**
@@ -371,6 +389,11 @@ rates by county in 2020.**
 ### Interaction Model
 
 ```{r}
+library(sjPlot)
+```
+
+
+```{r}
 # First we need a data frame with both poverty and AQ information. 
 # PM 2.5, POVERTY, AND COVID 
 pm_poverty_covid <- inner_join(california_pm_covid, ca_counties_poverty, by = "county")
@@ -426,7 +449,6 @@ summary(lm(deaths_pct_cases ~  average_pm + poverty_level_pct + poverty_level_pc
 summary(lm(deaths_pct_cases ~  average_pm + poverty_level_pct + poverty_level_pct:average_pm, data = pm_poverty_covid_rmoutliers))
 ```
 
-**INTERPRET REGRESSION RESULTS**
 
 REMOVED OUTLIERS
 
@@ -438,15 +460,36 @@ average_pm:poverty_level_pct 0.001261 0.005801 0.217 0.829
 Residual standard error: 0.4185 on 46 degrees of freedom Multiple
 R-squared: 0.07067, Adjusted R-squared: 0.01006 F-statistic: 1.166 on 3
 and 46 DF, p-value: 0.333
+```{r}
+intmodel_pm_rmoutliers <- lm(deaths_pct_cases ~  average_pm + poverty_level_pct + poverty_level_pct:average_pm, data = pm_poverty_covid_rmoutliers)
+
+tab_model(intmodel_pm_rmoutliers)
+
+# CONFIDENCE INTERVAL PM 
+intCI_pm <- confint(intmodel_pm_rmoutliers, level = 0.95)
+
+apply(intCI_pm, 1, function(x) paste0("95% CI: [", 
+        round(x[1], 2), ",", round(x[2], 2), "]"))
+```
 
 ```{r}
 # AQI
-summary(lm(deaths_pct_cases ~  poverty_level_pct + average_aqi + poverty_level_pct:average_aqi, data = aqi_poverty_covid))
+intmodel_aqi <- summary(lm(deaths_pct_cases ~  poverty_level_pct + average_aqi + poverty_level_pct:average_aqi, data = aqi_poverty_covid))
 
 summary(lm(deaths_pct_cases ~  poverty_level_pct + average_aqi + poverty_level_pct:average_aqi, data = aqi_poverty_covid_rmoutliers))
 ```
 
-**INTERPRET REGRESSION RESULTS**
+
+```{r}
+intmodel_aqi_rmoutliers <- lm(deaths_pct_cases ~  poverty_level_pct + average_aqi + poverty_level_pct:average_aqi, data = aqi_poverty_covid_rmoutliers)
+
+intCI_aqi <- confint(intmodel_aqi_rmoutliers, level = 0.95)
+
+apply(intCI_aqi, 1, function(x) paste0("95% CI: [", 
+        round(x[1], 2), ",", round(x[2], 2), "]"))
+
+```
+
 
 REMOVED OUTLIERS
 
